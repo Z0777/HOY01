@@ -1,0 +1,273 @@
+If(IsBlank(DatePicker4_3.SelectedDate) And Radio1.Selected.Value = "Request";
+    Notify("Fecha requerida (Requested date)"; NotificationType.Error);
+    
+    Switch(Radio1.Selected.Value;
+    
+        "Request";
+            If(CountRows(Filter(colItemsSolicitud; !IsBlank(TipoItem) And Cantidad > 0)) = 0;
+                Notify("Agrega al menos un item con tipo y cantidad > 0"; NotificationType.Error);
+                
+                ForAll(
+                    Filter(colItemsSolicitud; !IsBlank(TipoItem) And Cantidad > 0) As item;
+                    Patch(SOLICITUDESPA;
+                        Defaults(SOLICITUDESPA);
+                        {
+                            Título: varEtapaSetName & "-" & varEtapaSeleccionada & "-" & item.TipoItem & "-" & Text(Now(); "yyyymmddhhmm");
+                            SetName: varEtapaSetName;
+                            Crop: varEtapaCultivo;
+                            Stage: {Value: varEtapaSeleccionada};
+                            ItemType: {Value: item.TipoItem};
+                            RequestType: {Value: item.TipoItem};
+                            ActionType: {Value: "Solicitud"};
+                            RequestedDate: DatePicker4_3.SelectedDate;
+                            Priority: {Value: Coalesce(drpPrioridadtissue.Selected.Value; "Standard")};
+                            Status: {Value: "New Request"};
+                            Mode: {Value: "Request"};
+                            Quantity: item.Cantidad;
+                            NumberPlots: If(item.TipoItem = "Sowing"; item.Cantidad; 0);
+                            NumberLabels: If("Label" in item.TipoItem; item.Cantidad; 0);
+                            Instructions: Coalesce(TexImpPlantsReq1_6.Text; "");
+                            Comment: Coalesce(item.Comentario; "");
+                            Area: Coalesce(varEtapaRegistro.Area.Value; "SSD");
+                            TrialIntent: Coalesce(varEtapaRegistro.TrialIntent.Value; "");
+                            Program: Coalesce(varEtapaRegistro.Program.Value; "");
+                            PEA: Coalesce(varEtapaRegistro.PEA; "");
+                            Greenhouse: Coalesce(varEtapaRegistro.Greenhouse; "");
+                            Nursery: Coalesce(varEtapaRegistro.Nursery; "");
+                            MCT: Coalesce(varEtapaRegistro.MCT.Value; "");
+                            Generation: Coalesce(varEtapaRegistro.Generation.Value; "")
+                        }
+                    )
+                );
+                
+                With({fechaReq: DatePicker4_3.SelectedDate};
+                    Patch(DATASUMMARY;
+                        LookUp(DATASUMMARY; ID = varEtapaSetID);
+                        Switch(varEtapaSeleccionada;
+                            "SowingMale"; {SowingMaleReq: fechaReq};
+                            "SowingFemale"; {SowingFemReq: fechaReq};
+                            "TissuePre"; {TissuePreReq: fechaReq};
+                            "FingerprintTissue"; {FingerprintTissueReq: fechaReq};
+                            "Transplant"; {TransplantReq: fechaReq};
+                            "TissuePost"; {TissuePostReq: fechaReq};
+                            "PolStart"; {PolStartReq: fechaReq};
+                            "PolEnd"; {PolEndReq: fechaReq};
+                            "Miniprint"; {MiniprintReq: fechaReq};
+                            "HarvestFirst"; {HarvestFirstReq: fechaReq};
+                            "HarvestLast"; {HarvestLastReq: fechaReq};
+                            "Processing"; {ProcessingReq: fechaReq};
+                            "FingerprintSeeds"; {FingerprintSeedsReq: fechaReq};
+                            "SPA"; {SPAReq: fechaReq};
+                            "Shipping"; {ShippingReq: fechaReq};
+                            {Título: varEtapaSetName}
+                        )
+                    )
+                );
+                
+                Refresh(DATASUMMARY);
+                ClearCollect(colSets; DATASUMMARY);
+                Refresh(SOLICITUDESPA);
+                ClearCollect(colSolicitudes; SOLICITUDESPA);
+                
+                With({
+                    grupoCorreo: Switch(true;
+                        varEtapaCropFamily = "Sol" And Coalesce(varEtapaRegistro.Area.Value; "") = "VTI"; varGruposEmail.SolVTI;
+                        varEtapaCropFamily = "Sol"; varGruposEmail.SolOther;
+                        varEtapaCropFamily = "Cuc" And Coalesce(varEtapaRegistro.Area.Value; "") = "VTI"; varGruposEmail.CucVTI;
+                        varEtapaCropFamily = "Cuc"; varGruposEmail.CucOther;
+                        varGruposEmail.SolOther
+                    );
+                    etiquetaEtapa: Switch(varEtapaSeleccionada;
+                        "SowingMale"; "Siembra macho";
+                        "SowingFemale"; "Siembra hembra";
+                        "TissuePre"; "Tissue pre-planting";
+                        "FingerprintTissue"; "Fingerprint tejido";
+                        "Transplant"; "Trasplante";
+                        "TissuePost"; "Tissue post-planting";
+                        "PolStart"; "Polinización inicio";
+                        "PolEnd"; "Polinización fin";
+                        "Miniprint"; "Miniprint";
+                        "HarvestFirst"; "Primera cosecha";
+                        "HarvestLast"; "Última cosecha";
+                        "Processing"; "Procesamiento";
+                        "FingerprintSeeds"; "Fingerprint semillas";
+                        "SPA"; "SPA";
+                        "Shipping"; "Envío / Shipping";
+                        varEtapaSeleccionada
+                    );
+                    cuerpoItems: Concat(
+                        Filter(colItemsSolicitud; !IsBlank(TipoItem) And Cantidad > 0);
+                        "<tr><td style='padding:6px;border:1px solid #ddd'>" & TipoItem & 
+                        "</td><td style='padding:6px;border:1px solid #ddd;text-align:center'><b>" & Cantidad & 
+                        "</b></td><td style='padding:6px;border:1px solid #ddd'>" & Coalesce(Comentario; "—") & 
+                        "</td></tr>";
+                        ""
+                    );
+                    colorPrioridad: If(
+                        Coalesce(drpPrioridadtissue.Selected.Value; "Standard") = "Urgent and Important"; 
+                        "#DC2626"; 
+                        "#0C384C"
+                    )
+                };
+                    Office365Outlook.SendEmailV2(
+                        grupoCorreo.To;
+                        "[" & etiquetaEtapa & "] Nueva solicitud — " & varEtapaSetName;
+                        "<div style='font-family:Segoe UI,Arial;font-size:13px;color:#0C384C;max-width:700px'>" &
+                        "<div style='background:#0C384C;color:white;padding:12px 16px;border-radius:6px 6px 0 0'>" &
+                        "<h2 style='margin:0;font-size:16px'>📋 Nueva solicitud en Pipeline</h2>" &
+                        "<p style='margin:4px 0 0 0;font-size:12px;opacity:0.9'>" & 
+                            varEtapaCultivo & " · " & varEtapaCropFamily & 
+                            " · Área " & Coalesce(varEtapaRegistro.Area.Value; "—") & 
+                        "</p></div>" &
+                        "<div style='background:#F8FAFC;padding:16px;border:1px solid #DDE2E8;border-top:none'>" &
+                        "<table style='border-collapse:collapse;width:100%;font-size:13px'>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5;width:35%'><b>Set</b></td>" &
+                        "<td style='padding:6px 8px'>" & varEtapaSetName & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>VCR</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.VCR; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Etapa</b></td>" &
+                        "<td style='padding:6px 8px'><b>" & etiquetaEtapa & "</b></td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Generación</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.Generation.Value; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Greenhouse / Nursery</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.Greenhouse; "—") & 
+                        " / " & Coalesce(varEtapaRegistro.Nursery; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>PEA</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.PEA; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Trial / Program</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.TrialIntent.Value; "—") & 
+                        " / " & Coalesce(varEtapaRegistro.Program.Value; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Prioridad</b></td>" &
+                        "<td style='padding:6px 8px;color:" & colorPrioridad & ";font-weight:600'>" & 
+                            Coalesce(drpPrioridadtissue.Selected.Value; "Standard") & 
+                        "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Fecha requerida</b></td>" &
+                        "<td style='padding:6px 8px'><b>" & Text(DatePicker4_3.SelectedDate; "dd/mm/yyyy") & "</b></td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Solicitado por</b></td>" &
+                        "<td style='padding:6px 8px'>" & varUsuario & " · " & Text(Now(); "dd/mm/yyyy hh:mm") & "</td></tr>" &
+                        "</table>" &
+                        "</div>" &
+                        "<h3 style='color:#0C384C;margin-top:16px;font-size:14px'>📦 Items solicitados</h3>" &
+                        "<table style='border-collapse:collapse;width:100%;font-size:13px'>" &
+                        "<tr style='background:#88BC30;color:white'>" &
+                        "<th style='padding:8px;border:1px solid #ddd;text-align:left'>Tipo</th>" &
+                        "<th style='padding:8px;border:1px solid #ddd;text-align:center;width:100px'>Cantidad</th>" &
+                        "<th style='padding:8px;border:1px solid #ddd;text-align:left'>Comentario</th></tr>" &
+                        cuerpoItems &
+                        "</table>" &
+                        If(Len(Coalesce(TexImpPlantsReq1_6.Text; "")) > 0;
+                            "<div style='margin-top:16px;padding:12px;background:#FEF9ED;border-left:4px solid #E8A820;font-size:13px'>" &
+                            "<b>📝 Instrucciones generales:</b><br>" & TexImpPlantsReq1_6.Text & 
+                            "</div>";
+                            ""
+                        ) &
+                        "<p style='margin-top:20px;font-size:11px;color:#7A8694;border-top:1px solid #DDE2E8;padding-top:12px'>" &
+                        "Este correo fue generado automáticamente por Pipeline App." &
+                        "</p>" &
+                        "</div>";
+                        {
+                            Cc: grupoCorreo.Cc;
+                            Importance: If(
+                                Coalesce(drpPrioridadtissue.Selected.Value; "Standard") = "Urgent and Important"; 
+                                "High"; 
+                                "Normal"
+                            );
+                            IsHtml: true
+                        }
+                    )
+                );
+                
+                Notify("✅ Solicitud creada y correo enviado"; NotificationType.Success);
+                Set(varShowRequestForm; false);
+                Set(varShowActionSelect; false);
+                Reset(TexImpPlantsReq1_6);
+                Clear(colItemsSolicitud);
+                Set(varSolicitudExistente; Blank())
+            );
+        
+        "Delivery";
+            ForAll(
+                Filter(colItemsSolicitud; IdTemp > 0) As item;
+                Patch(SOLICITUDESPA;
+                    LookUp(SOLICITUDESPA; ID = item.IdTemp);
+                    {
+                        DeliveryDate: Today();
+                        Status: {Value: "Delivered"};
+                        Quantity: item.Cantidad;
+                        Comment: Coalesce(item.Comentario; "");
+                        NumberOfPeople: Value(Coalesce(txtPersonas.Text; "0"));
+                        StartTime: dtStartTime.SelectedDate;
+                        EndTime: dtEndTime.SelectedDate;
+                        Responsible: Coalesce(Combobox4_4.Selected.Value; "")
+                    }
+                )
+            );
+            
+            With({fechaReal: Today()};
+                Patch(DATASUMMARY;
+                    LookUp(DATASUMMARY; ID = varEtapaSetID);
+                    Switch(varEtapaSeleccionada;
+                        "SowingMale"; {SowingMaleDeliv: fechaReal};
+                        "SowingFemale"; {SowingFemDeliv: fechaReal};
+                        "TissuePre"; {TissuePreDeliv: fechaReal};
+                        "FingerprintTissue"; {FingerprintTissueDeliv: fechaReal};
+                        "Transplant"; {TransplantDeliv: fechaReal};
+                        "TissuePost"; {TissuePostDeliv: fechaReal};
+                        "PolStart"; {PolStartDeliv: fechaReal};
+                        "PolEnd"; {PolEndDeliv: fechaReal};
+                        "Miniprint"; {MiniprintDeliv: fechaReal};
+                        "HarvestFirst"; {HarvestFirstDeliv: fechaReal};
+                        "HarvestLast"; {HarvestLastDeliv: fechaReal};
+                        "Processing"; {ProcessingDeliv: fechaReal};
+                        "FingerprintSeeds"; {FingerprintSeedsDeliv: fechaReal};
+                        "SPA"; {SPADeliv: fechaReal};
+                        "Shipping"; {ShippingDeliv: fechaReal};
+                        {Título: varEtapaSetName}
+                    )
+                )
+            );
+            
+            Refresh(SOLICITUDESPA);
+            ClearCollect(colSolicitudes; SOLICITUDESPA);
+            Refresh(DATASUMMARY);
+            ClearCollect(colSets; DATASUMMARY);
+            
+            With({
+                grupoCorreoDelivery: Switch(true;
+                    varEtapaCropFamily = "Sol" And Coalesce(varEtapaRegistro.Area.Value; "") = "VTI"; varGruposEmail.SolVTI;
+                    varEtapaCropFamily = "Sol"; varGruposEmail.SolOther;
+                    varEtapaCropFamily = "Cuc" And Coalesce(varEtapaRegistro.Area.Value; "") = "VTI"; varGruposEmail.CucVTI;
+                    varEtapaCropFamily = "Cuc"; varGruposEmail.CucOther;
+                    varGruposEmail.SolOther
+                )
+            };
+                Office365Outlook.SendEmailV2(
+                    grupoCorreoDelivery.To;
+                    "[ENTREGADO] " & varEtapaSeleccionada & " — " & varEtapaSetName;
+                    "<div style='font-family:Segoe UI,Arial;font-size:13px'>" &
+                    "<h2 style='color:#88BC30'>✅ Solicitud entregada</h2>" &
+                    "<p><b>Set:</b> " & varEtapaSetName & "<br>" &
+                    "<b>Etapa:</b> " & varEtapaSeleccionada & "<br>" &
+                    "<b>Fecha entrega:</b> " & Text(Today(); "dd/mm/yyyy") & "<br>" &
+                    "<b>Responsable:</b> " & Coalesce(Combobox4_4.Selected.Value; "—") & "<br>" &
+                    "<b>Personas:</b> " & Coalesce(txtPersonas.Text; "0") & "</p>" &
+                    "</div>";
+                    {
+                        Cc: grupoCorreoDelivery.Cc;
+                        IsHtml: true
+                    }
+                )
+            );
+            
+            Notify("✅ Entrega registrada y notificada"; NotificationType.Success);
+            Set(varShowRequestForm; false);
+            Set(varShowActionSelect; false);
+            Reset(TexImpPlantsReq1_6);
+            Clear(colItemsSolicitud);
+        
+        "Attachment only";
+            Notify("✅ Adjuntos guardados"; NotificationType.Success);
+            Set(varShowRequestForm; false);
+            Set(varShowActionSelect; false)
+    )
+)
