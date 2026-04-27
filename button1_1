@@ -1,0 +1,384 @@
+o select: 
+
+If(IsBlank(varSolicitudExistente);
+    Notify("Primero crea la solicitud para poder adjuntar archivos a este item"; 
+        NotificationType.Warning);
+    Set(varRegistroActual; 
+        Coalesce(
+            LookUp(SOLICITUDESPA; 
+                SetName = varEtapaSetName And 
+                Stage.Value = varEtapaSeleccionada And 
+                ItemType.Value = ThisItem.TipoItem
+            );
+            varSolicitudExistente
+        )
+    );
+    Set(varShowRequestForm; false);
+    Set(varMostrarPopupSets; true)
+)
+
+ButtonCanvas9 o select
+Set(varMostrarPopupSets; false);
+Set(varShowRequestForm; true)
+
+FormViewer1: DefaultMode
+FormMode.Edit
+
+
+conPopupSowingmaleattacment visible 
+=varMostrarPopupSets
+
+EstStart_Sowing
+o change
+=If(IsBlank(EstStart_Sowing.SelectedDate);
+    Notify("Selecciona una fecha válida"; NotificationType.Error);
+    With({
+        fechaBase: EstStart_Sowing.SelectedDate;
+        cfg: LookUp(colPhenoConfig;
+            Upper(Trim(Coalesce(Crop.Value; ""))) = Upper(Trim(Coalesce(ThisItem.Crop.Value; ""))) And
+            Upper(Trim(Coalesce(Generation; ""))) = Upper(Trim(Coalesce(ThisItem.Generation.Value; ""))) And
+            Upper(Trim(Coalesce(Area.Value; ""))) = Upper(Trim(Coalesce(ThisItem.Area.Value; ""))) And
+            (
+                IsBlank(MCT) Or
+                Upper(Trim(MCT)) = Upper(Trim(Coalesce(ThisItem.MCT.Value; "")))
+            ) And
+            (
+                IsBlank(Program) Or
+                Upper(Trim(Program)) = Upper(Trim(Coalesce(ThisItem.Program.Value; "")))
+            )
+        )
+    };
+        If(IsBlank(cfg);
+            Notify(
+                "No hay configuración fenológica para Crop=" & ThisItem.Crop.Value & 
+                " | Gen=" & Coalesce(ThisItem.Generation.Value; "?") & 
+                " | Area=" & Coalesce(ThisItem.Area.Value; "?") & 
+                " | MCT=" & Coalesce(ThisItem.MCT.Value; "?") & 
+                " | Program=" & Coalesce(ThisItem.Program.Value; "?"); 
+                NotificationType.Error
+            );
+            Patch(DATASUMMARY;
+                LookUp(DATASUMMARY; ID = ThisItem.ID);
+                {
+                    SowingMaleExp:        fechaBase;
+                    SowingFemExp:         DateAdd(fechaBase; Coalesce(cfg.SowingFemOffset; 0); TimeUnit.Days);
+                    TissuePreExp:         DateAdd(fechaBase; Coalesce(cfg.TissuePreOffset; 0); TimeUnit.Days);
+                    FingerprintTissueExp: DateAdd(fechaBase; Coalesce(cfg.FingerprintTissueOffset; 0); TimeUnit.Days);
+                    TransplantExp:        DateAdd(fechaBase; Coalesce(cfg.TransplantOffset; 0); TimeUnit.Days);
+                    TissuePostExp:        DateAdd(fechaBase; Coalesce(cfg.TissuePostOffset; 0); TimeUnit.Days);
+                    PolStartExp:          DateAdd(fechaBase; Coalesce(cfg.PolStartOffset; 0); TimeUnit.Days);
+                    PolEndExp:            DateAdd(fechaBase; Coalesce(cfg.PolEndOffset; 0); TimeUnit.Days);
+                    MiniprintExp:         DateAdd(fechaBase; Coalesce(cfg.MiniprintOffset; 0); TimeUnit.Days);
+                    HarvestFirstExp:      DateAdd(fechaBase; Coalesce(cfg.HarvestFirstOffset; 0); TimeUnit.Days);
+                    HarvestLastExp:       DateAdd(fechaBase; Coalesce(cfg.HarvestLastOffset; 0); TimeUnit.Days);
+                    ProcessingExp:        DateAdd(fechaBase; Coalesce(cfg.ProcessingOffset; 0); TimeUnit.Days);
+                    FingerprintSeedsExp:  DateAdd(fechaBase; Coalesce(cfg.FingerprintSeedsOffset; 0); TimeUnit.Days);
+                    SPAExp:               DateAdd(fechaBase; Coalesce(cfg.SPAOffset; 0); TimeUnit.Days);
+                    ShippingExp:          DateAdd(fechaBase; Coalesce(cfg.ShippingOffset; cfg.SPAOffset + 7); TimeUnit.Days)
+                }
+            );
+            Refresh(DATASUMMARY);
+            ClearCollect(colSets; DATASUMMARY);
+            Notify(
+                "✅ Fechas calculadas para " & ThisItem.SetName; 
+                NotificationType.Success
+            )
+        )
+    )
+)
+
+
+ButtonCanvas9_4
+OnSelect
+=If(IsBlank(DatePicker4_3.SelectedDate) And Radio1.Selected.Value = "Request";
+    Notify("Fecha requerida (Requested date)"; NotificationType.Error);
+    
+    Switch(Radio1.Selected.Value;
+    
+        "Request";
+            If(CountRows(Filter(colItemsSolicitud; !IsBlank(TipoItem) And Cantidad > 0)) = 0;
+                Notify("Agrega al menos un item con tipo y cantidad > 0"; NotificationType.Error);
+                
+                ForAll(
+                    Filter(colItemsSolicitud; !IsBlank(TipoItem) And Cantidad > 0) As item;
+                    Patch(SOLICITUDESPA;
+                        Defaults(SOLICITUDESPA);
+                        {
+                            Título: varEtapaSetName & "-" & varEtapaSeleccionada & "-" & item.TipoItem & "-" & Text(Now(); "yyyymmddhhmm");
+                            SetName: varEtapaSetName;
+                            Crop: varEtapaCultivo;
+                            Stage: {Value: varEtapaSeleccionada};
+                            ItemType: {Value: item.TipoItem};
+                            RequestType: {Value: item.TipoItem};
+                            ActionType: {Value: "Solicitud"};
+                            RequestedDate: DatePicker4_3.SelectedDate;
+                            Priority: {Value: Coalesce(drpPrioridadtissue.Selected.Value; "Standard")};
+                            Status: {Value: "New Request"};
+                            Mode: {Value: "Request"};
+                            Quantity: item.Cantidad;
+                            NumberPlots: If(item.TipoItem = "Sowing"; item.Cantidad; 0);
+                            NumberLabels: If("Label" in item.TipoItem; item.Cantidad; 0);
+                            Instructions: Coalesce(TexImpPlantsReq1_6.Text; "");
+                            Comment: Coalesce(item.Comentario; "");
+                            Area: Coalesce(varEtapaRegistro.Area.Value; "SSD");
+                            TrialIntent: Coalesce(varEtapaRegistro.TrialIntent.Value; "");
+                            Program: Coalesce(varEtapaRegistro.Program.Value; "");
+                            PEA: Coalesce(varEtapaRegistro.PEA; "");
+                            Greenhouse: Coalesce(varEtapaRegistro.Greenhouse; "");
+                            Nursery: Coalesce(varEtapaRegistro.Nursery; "");
+                            MCT: Coalesce(varEtapaRegistro.MCT.Value; "");
+                            Generation: Coalesce(varEtapaRegistro.Generation.Value; "")
+                        }
+                    )
+                );
+                
+                With({fechaReq: DatePicker4_3.SelectedDate};
+                    Patch(DATASUMMARY;
+                        LookUp(DATASUMMARY; ID = varEtapaSetID);
+                        Switch(varEtapaSeleccionada;
+                            "SowingMale"; {SowingMaleReq: fechaReq};
+                            "SowingFemale"; {SowingFemReq: fechaReq};
+                            "TissuePre"; {TissuePreReq: fechaReq};
+                            "FingerprintTissue"; {FingerprintTissueReq: fechaReq};
+                            "Transplant"; {TransplantReq: fechaReq};
+                            "TissuePost"; {TissuePostReq: fechaReq};
+                            "PolStart"; {PolStartReq: fechaReq};
+                            "PolEnd"; {PolEndReq: fechaReq};
+                            "Miniprint"; {MiniprintReq: fechaReq};
+                            "HarvestFirst"; {HarvestFirstReq: fechaReq};
+                            "HarvestLast"; {HarvestLastReq: fechaReq};
+                            "Processing"; {ProcessingReq: fechaReq};
+                            "FingerprintSeeds"; {FingerprintSeedsReq: fechaReq};
+                            "SPA"; {SPAReq: fechaReq};
+                            "Shipping"; {ShippingReq: fechaReq};
+                            {Título: varEtapaSetName}
+                        )
+                    )
+                );
+                
+                Refresh(DATASUMMARY);
+                ClearCollect(colSets; DATASUMMARY);
+                Refresh(SOLICITUDESPA);
+                ClearCollect(colSolicitudes; SOLICITUDESPA);
+                
+                With({
+                    grupoCorreo: Switch(true;
+                        varEtapaCropFamily = "Sol" And Coalesce(varEtapaRegistro.Area.Value; "") = "VTI"; varGruposEmail.SolVTI;
+                        varEtapaCropFamily = "Sol"; varGruposEmail.SolOther;
+                        varEtapaCropFamily = "Cuc" And Coalesce(varEtapaRegistro.Area.Value; "") = "VTI"; varGruposEmail.CucVTI;
+                        varEtapaCropFamily = "Cuc"; varGruposEmail.CucOther;
+                        varGruposEmail.SolOther
+                    );
+                    etiquetaEtapa: Switch(varEtapaSeleccionada;
+                        "SowingMale"; "Siembra macho";
+                        "SowingFemale"; "Siembra hembra";
+                        "TissuePre"; "Tissue pre-planting";
+                        "FingerprintTissue"; "Fingerprint tejido";
+                        "Transplant"; "Trasplante";
+                        "TissuePost"; "Tissue post-planting";
+                        "PolStart"; "Polinización inicio";
+                        "PolEnd"; "Polinización fin";
+                        "Miniprint"; "Miniprint";
+                        "HarvestFirst"; "Primera cosecha";
+                        "HarvestLast"; "Última cosecha";
+                        "Processing"; "Procesamiento";
+                        "FingerprintSeeds"; "Fingerprint semillas";
+                        "SPA"; "SPA";
+                        "Shipping"; "Envío / Shipping";
+                        varEtapaSeleccionada
+                    );
+                    cuerpoItems: Concat(
+                        Filter(colItemsSolicitud; !IsBlank(TipoItem) And Cantidad > 0);
+                        "<tr><td style='padding:6px;border:1px solid #ddd'>" & TipoItem & 
+                        "</td><td style='padding:6px;border:1px solid #ddd;text-align:center'><b>" & Cantidad & 
+                        "</b></td><td style='padding:6px;border:1px solid #ddd'>" & Coalesce(Comentario; "—") & 
+                        "</td></tr>";
+                        ""
+                    );
+                    colorPrioridad: If(
+                        Coalesce(drpPrioridadtissue.Selected.Value; "Standard") = "Urgent and Important"; 
+                        "#DC2626"; 
+                        "#0C384C"
+                    )
+                };
+                    Office365Outlook.SendEmailV2(
+                        grupoCorreo.To;
+                        "[" & etiquetaEtapa & "] Nueva solicitud — " & varEtapaSetName;
+                        "<div style='font-family:Segoe UI,Arial;font-size:13px;color:#0C384C;max-width:700px'>" &
+                        "<div style='background:#0C384C;color:white;padding:12px 16px;border-radius:6px 6px 0 0'>" &
+                        "<h2 style='margin:0;font-size:16px'>📋 Nueva solicitud en Pipeline</h2>" &
+                        "<p style='margin:4px 0 0 0;font-size:12px;opacity:0.9'>" & 
+                            varEtapaCultivo & " · " & varEtapaCropFamily & 
+                            " · Área " & Coalesce(varEtapaRegistro.Area.Value; "—") & 
+                        "</p></div>" &
+                        "<div style='background:#F8FAFC;padding:16px;border:1px solid #DDE2E8;border-top:none'>" &
+                        "<table style='border-collapse:collapse;width:100%;font-size:13px'>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5;width:35%'><b>Set</b></td>" &
+                        "<td style='padding:6px 8px'>" & varEtapaSetName & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>VCR</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.VCR; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Etapa</b></td>" &
+                        "<td style='padding:6px 8px'><b>" & etiquetaEtapa & "</b></td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Generación</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.Generation.Value; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Greenhouse / Nursery</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.Greenhouse; "—") & 
+                        " / " & Coalesce(varEtapaRegistro.Nursery; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>PEA</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.PEA; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Trial / Program</b></td>" &
+                        "<td style='padding:6px 8px'>" & Coalesce(varEtapaRegistro.TrialIntent.Value; "—") & 
+                        " / " & Coalesce(varEtapaRegistro.Program.Value; "—") & "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Prioridad</b></td>" &
+                        "<td style='padding:6px 8px;color:" & colorPrioridad & ";font-weight:600'>" & 
+                            Coalesce(drpPrioridadtissue.Selected.Value; "Standard") & 
+                        "</td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Fecha requerida</b></td>" &
+                        "<td style='padding:6px 8px'><b>" & Text(DatePicker4_3.SelectedDate; "dd/mm/yyyy") & "</b></td></tr>" &
+                        "<tr><td style='padding:6px 8px;background:#EEF1F5'><b>Solicitado por</b></td>" &
+                        "<td style='padding:6px 8px'>" & varUsuario & " · " & Text(Now(); "dd/mm/yyyy hh:mm") & "</td></tr>" &
+                        "</table>" &
+                        "</div>" &
+                        "<h3 style='color:#0C384C;margin-top:16px;font-size:14px'>📦 Items solicitados</h3>" &
+                        "<table style='border-collapse:collapse;width:100%;font-size:13px'>" &
+                        "<tr style='background:#88BC30;color:white'>" &
+                        "<th style='padding:8px;border:1px solid #ddd;text-align:left'>Tipo</th>" &
+                        "<th style='padding:8px;border:1px solid #ddd;text-align:center;width:100px'>Cantidad</th>" &
+                        "<th style='padding:8px;border:1px solid #ddd;text-align:left'>Comentario</th></tr>" &
+                        cuerpoItems &
+                        "</table>" &
+                        If(Len(Coalesce(TexImpPlantsReq1_6.Text; "")) > 0;
+                            "<div style='margin-top:16px;padding:12px;background:#FEF9ED;border-left:4px solid #E8A820;font-size:13px'>" &
+                            "<b>📝 Instrucciones generales:</b><br>" & TexImpPlantsReq1_6.Text & 
+                            "</div>";
+                            ""
+                        ) &
+                        "</div>";
+                        {
+                            Cc: grupoCorreo.Cc;
+                            Importance: If(
+                                Coalesce(drpPrioridadtissue.Selected.Value; "Standard") = "Urgent and Important"; 
+                                "High"; 
+                                "Normal"
+                            );
+                            IsHtml: true
+                        }
+                    )
+                );
+                
+                Notify("✅ Solicitud creada y correo enviado"; NotificationType.Success);
+                Set(varShowRequestForm; false);
+                Set(varShowActionSelect; false);
+                Reset(TexImpPlantsReq1_6);
+                Clear(colItemsSolicitud);
+                Set(varSolicitudExistente; Blank())
+            );
+        
+        "Delivery";
+            ForAll(
+                Filter(colItemsSolicitud; IdTemp > 0) As item;
+                Patch(SOLICITUDESPA;
+                    LookUp(SOLICITUDESPA; ID = item.IdTemp);
+                    {
+                        DeliveryDate: Today();
+                        Status: {Value: "Delivered"};
+                        Quantity: item.Cantidad;
+                        Comment: Coalesce(item.Comentario; "");
+                        NumberOfPeople: Value(Coalesce(txtPersonas.Text; "0"));
+                        StartTime: dtStartTime.SelectedDate;
+                        EndTime: dtEndTime.SelectedDate;
+                        Responsible: Coalesce(Combobox4_4.Selected.Value; "")
+                    }
+                )
+            );
+            
+            With({fechaReal: Today()};
+                Patch(DATASUMMARY;
+                    LookUp(DATASUMMARY; ID = varEtapaSetID);
+                    Switch(varEtapaSeleccionada;
+                        "SowingMale"; {SowingMaleDeliv: fechaReal};
+                        "SowingFemale"; {SowingFemDeliv: fechaReal};
+                        "TissuePre"; {TissuePreDeliv: fechaReal};
+                        "FingerprintTissue"; {FingerprintTissueDeliv: fechaReal};
+                        "Transplant"; {TransplantDeliv: fechaReal};
+                        "TissuePost"; {TissuePostDeliv: fechaReal};
+                        "PolStart"; {PolStartDeliv: fechaReal};
+                        "PolEnd"; {PolEndDeliv: fechaReal};
+                        "Miniprint"; {MiniprintDeliv: fechaReal};
+                        "HarvestFirst"; {HarvestFirstDeliv: fechaReal};
+                        "HarvestLast"; {HarvestLastDeliv: fechaReal};
+                        "Processing"; {ProcessingDeliv: fechaReal};
+                        "FingerprintSeeds"; {FingerprintSeedsDeliv: fechaReal};
+                        "SPA"; {SPADeliv: fechaReal};
+                        "Shipping"; {ShippingDeliv: fechaReal};
+                        {Título: varEtapaSetName}
+                    )
+                )
+            );
+            
+            Refresh(SOLICITUDESPA);
+            ClearCollect(colSolicitudes; SOLICITUDESPA);
+            Refresh(DATASUMMARY);
+            ClearCollect(colSets; DATASUMMARY);
+            
+            Notify("✅ Entrega registrada"; NotificationType.Success);
+            Set(varShowRequestForm; false);
+            Set(varShowActionSelect; false);
+            Reset(TexImpPlantsReq1_6);
+            Clear(colItemsSolicitud);
+        
+        "Attachment only";
+            Notify("✅ Adjuntos guardados"; NotificationType.Success);
+            Set(varShowRequestForm; false);
+            Set(varShowActionSelect; false)
+    )
+)
+
+lblGenStatus text
+
+=With({
+    fechaInicio: ThisItem.SowingMaleExp;
+    fechaFin: Coalesce(ThisItem.ShippingExp; ThisItem.SPAExp);
+    hoy: Today()
+};
+    With({
+        diasTranscurridos: If(IsBlank(fechaInicio); 0; DateDiff(fechaInicio; hoy; TimeUnit.Days));
+        diasTotales: If(IsBlank(fechaInicio) Or IsBlank(fechaFin); 0; DateDiff(fechaInicio; fechaFin; TimeUnit.Days));
+        diasFaltantes: If(IsBlank(fechaFin); 0; DateDiff(hoy; fechaFin; TimeUnit.Days));
+        etapaActual: Switch(true;
+            !IsBlank(ThisItem.ShippingReal); "Finalizado";
+            !IsBlank(ThisItem.SPAReal); "Shipping";
+            !IsBlank(ThisItem.FingerprintSeedsReal); "SPA";
+            !IsBlank(ThisItem.ProcessingReal); "Fingerprint semillas";
+            !IsBlank(ThisItem.HarvestLastReal); "Procesamiento";
+            !IsBlank(ThisItem.HarvestFirstReal); "Última cosecha";
+            !IsBlank(ThisItem.MiniprintReal); "Primera cosecha";
+            !IsBlank(ThisItem.PolEndReal); "Miniprint";
+            !IsBlank(ThisItem.PolStartReal); "Polinización fin";
+            !IsBlank(ThisItem.TissuePostReal); "Polinización inicio";
+            !IsBlank(ThisItem.TransplantReal); "Tissue post-planting";
+            !IsBlank(ThisItem.FingerprintTissueReal); "Trasplante";
+            !IsBlank(ThisItem.TissuePreReal); "Fingerprint tejido";
+            !IsBlank(ThisItem.SowingFemReal); "Tissue pre-planting";
+            !IsBlank(ThisItem.SowingMaleReal); 
+                If(ThisItem.Crop.Value = "Cucumber"; "Siembra hembra"; "Tissue pre-planting");
+            !IsBlank(ThisItem.SowingMaleExp); "Siembra macho";
+            "Sin iniciar"
+        )
+    };
+        If(IsBlank(fechaInicio);
+            "Sin iniciar";
+            If(diasTotales = 0;
+                "Día " & diasTranscurridos & " · " & etapaActual;
+                "Día " & diasTranscurridos & "/" & diasTotales & " · " & etapaActual & 
+                If(diasFaltantes > 0; " · Faltan " & diasFaltantes & "d";
+                   diasFaltantes = 0; " · Hoy!";
+                   " · Atrasado " & Abs(diasFaltantes) & "d"
+                )
+            )
+        )
+    )
+)
+
+
+
