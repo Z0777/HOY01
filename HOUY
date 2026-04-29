@@ -1,0 +1,634 @@
+🔴 BLOQUE 1 — Botón "Add tissue shipment" (ButtonCanvas10) guarda y vuelve al popup de solicitud
+El problema es que ButtonCanvas10 no envía el form ni guarda los adjuntos en SOLICITUDESPA. Vamos a corregirlo.
+1.1 — FormViewer1.DefaultMode
+Ruta: conPopupSowingmaleattacment → conCajaBlanca → FormViewer1
+Propiedad: DefaultMode
+powerfx=FormMode.Edit
+1.2 — FormViewer1.Item (asegúrate que apunte al registro real)
+Propiedad: Item
+powerfx=varRegistroActual
+1.3 — ButtonCanvas10.OnSelect (botón verde "Add tissue shipment")
+Ruta: conPopupSowingmaleattacment → conCajaBlanca → conBotones2 → ButtonCanvas10
+Propiedad: OnSelect
+powerfx=SubmitForm(FormViewer1);;
+If(FormViewer1.Error <> "";
+    Notify("❌ Error al guardar adjunto: " & FormViewer1.Error; NotificationType.Error);
+    Refresh(SOLICITUDESPA);;
+    ClearCollect(colSolicitudes; SOLICITUDESPA);;
+    Set(varSolicitudExistente; LookUp(SOLICITUDESPA; ID = varRegistroActual.ID));;
+    Set(varMostrarPopupSets; false);;
+    Set(varShowRequestForm; true);;
+    Notify("📎 Archivo adjuntado a solicitud #" & varRegistroActual.ID; NotificationType.Success)
+)
+1.4 — ButtonCanvas9.OnSelect (botón "Cancelar" del popup de adjuntos)
+Ruta: conPopupSowingmaleattacment → conCajaBlanca → conBotones2 → ButtonCanvas9
+Propiedad: OnSelect
+powerfx=Set(varMostrarPopupSets; false);;
+Set(varShowRequestForm; true)
+1.5 — Icon12.OnSelect (X del popup de adjuntos)
+Ruta: conPopupSowingmaleattacment → conCajaBlanca → Icon12
+Propiedad: OnSelect
+powerfx=Set(varMostrarPopupSets; false);;
+Set(varShowRequestForm; true)
+1.6 — Datos adjuntos_DataCard2.Update
+Ruta: conPopupSowingmaleattacment → conCajaBlanca → FormViewer1 → Datos adjuntos_DataCard2
+Propiedad: Update
+powerfx=DataCardValue1.Attachments
+
+Nota: Esto guarda los adjuntos directo en SOLICITUDESPA, en la columna nativa "Datos adjuntos" del registro al que apunta varRegistroActual.ID.
+
+
+🔴 BLOQUE 2 — Permitir CREAR NUEVAS solicitudes en la misma etapa (Harvest, Sowing, etc.)
+El problema actual: cuando oprimes un botón de etapa, carga la solicitud existente y bloquea crear una nueva. Para Harvest necesitas crear varias solicitudes.
+2.1 — Cambiar el comportamiento de TODOS los botones btnStage_*
+Vamos a usar el de btnStage_Sowing como ejemplo. Aplicar el mismo patrón a TODOS los botones de etapa.
+Ruta: conFenoRow_Sowing-male → btnStage_Sowing
+Propiedad: OnSelect
+powerfx=Set(varEtapaSeleccionada; "SowingMale");;
+Set(varEtapaSetID; ThisItem.ID);;
+Set(varEtapaSetName; ThisItem.SetName);;
+Set(varEtapaCultivo; ThisItem.Crop.Value);;
+Set(varEtapaCropFamily; ThisItem.CropFamily.Value);;
+Set(varEtapaRegistro; ThisItem);;
+/* NO cargar solicitud existente — siempre crear nueva */
+Set(varSolicitudExistente; Blank());;
+Clear(colItemsSolicitud);;
+/* Cargar lista de solicitudes existentes para mostrarlas en el panel inferior */
+ClearCollect(colSolicitudesEtapa;
+    Filter(colSolicitudes;
+        SetName = ThisItem.SetName And Stage.Value = "SowingMale"
+    )
+);;
+Set(varShowActionSelect; false);;
+Set(varShowRequestForm; true)
+
+Aplica este mismo patrón a btnStage_Sowing_1, btnStage_Tissue, btnStage_FPTissue, btnStage_Trasplanted, btnStage_TissuePost, btnStage_Polinitation, btnStage_Polinitation_1, btnStage_Miniprint, btnStage_Harvest, btnStage_Harvest_1, btnStage_Processing, btnStage_FPSeeds, btnStage_SPA, btnStage_FPSeeds_1. Solo cambia "SowingMale" por la etapa correspondiente.
+
+
+🔴 BLOQUE 3 — Botón verde "Crear y enviar correo" (ButtonCanvas9_4) corregido
+Este botón tiene 3 errores: usa , en vez de ;, faltan los ;; para encadenar instrucciones, y no indica adjuntos en el correo.
+Ruta: conPopupRequestSowingmale → conCajaBlanca1_2 → conBotones2_4 → ButtonCanvas9_4
+Propiedad: OnSelect
+powerfx=If(IsBlank(DatePicker4_3.SelectedDate);
+    Notify("Required: Requested date"; NotificationType.Error);
+    If(CountRows(Filter(colItemsSolicitud; !IsBlank(TipoItem) And Cantidad > 0)) = 0;
+        Notify("Add at least one item with type and quantity > 0"; NotificationType.Error);
+        /* Crear UN registro maestro por solicitud */
+        Set(_solicitudMaestra;
+            Patch(SOLICITUDESPA;
+                Defaults(SOLICITUDESPA);
+                {
+                    Título:        varEtapaSetName & "-" & varEtapaSeleccionada & "-" & Text(Now(); "yyyymmddhhmm");
+                    SetName:       varEtapaSetName;
+                    Crop:          varEtapaCultivo;
+                    Stage:         {Value: varEtapaSeleccionada};
+                    ItemType:      {Value: First(colItemsSolicitud).TipoItem};
+                    RequestType:   {Value: First(colItemsSolicitud).TipoItem};
+                    ActionType:    {Value: "Solicitud"};
+                    RequestedDate: DatePicker4_3.SelectedDate;
+                    Priority:      {Value: Coalesce(drpPrioridadtissue.Selected.Value; "Standard")};
+                    Status:        {Value: "New Request"};
+                    Mode:          {Value: "Request"};
+                    Quantity:      Sum(colItemsSolicitud; Cantidad);
+                    Instructions:  Coalesce(TexImpPlantsReq1_6.Text; "");
+                    Area:          Coalesce(varEtapaRegistro.Area.Value; "SSD");
+                    TrialIntent:   Coalesce(varEtapaRegistro.TrialIntent.Value; "");
+                    Program:       Coalesce(varEtapaRegistro.Program.Value; "");
+                    PEA:           Coalesce(varEtapaRegistro.PEA; "");
+                    Greenhouse:    Coalesce(varEtapaRegistro.Greenhouse; "");
+                    Nursery:       Coalesce(varEtapaRegistro.Nursery; "");
+                    MCT:           Coalesce(varEtapaRegistro.MCT.Value; "");
+                    Generation:    Coalesce(varEtapaRegistro.Generation.Value; "")
+                }
+            )
+        );;
+        /* Actualizar fecha Req en DATASUMMARY */
+        With({_fechaReq: DatePicker4_3.SelectedDate};
+            Patch(DATASUMMARY;
+                LookUp(DATASUMMARY; ID = varEtapaSetID);
+                Switch(varEtapaSeleccionada;
+                    "SowingMale";         {SowingMaleReq: _fechaReq};
+                    "SowingFemale";       {SowingFemReq: _fechaReq};
+                    "TissuePre";          {TissuePreReq: _fechaReq};
+                    "FingerprintTissue";  {FingerprintTissueReq: _fechaReq};
+                    "Transplant";         {TransplantReq: _fechaReq};
+                    "TissuePost";         {TissuePostReq: _fechaReq};
+                    "PolStart";           {PolStartReq: _fechaReq};
+                    "PolEnd";             {PolEndReq: _fechaReq};
+                    "Miniprint";          {MiniprintReq: _fechaReq};
+                    "HarvestFirst";       {HarvestFirstReq: _fechaReq};
+                    "HarvestLast";        {HarvestLastReq: _fechaReq};
+                    "Processing";         {ProcessingReq: _fechaReq};
+                    "FingerprintSeeds";   {FingerprintSeedsReq: _fechaReq};
+                    "SPA";                {SPAReq: _fechaReq};
+                    "Shipping";           {ShippingReq: _fechaReq};
+                    {Título: varEtapaSetName}
+                )
+            )
+        );;
+        Refresh(SOLICITUDESPA);;
+        ClearCollect(colSolicitudes; SOLICITUDESPA);;
+        Refresh(DATASUMMARY);;
+        ClearCollect(colSets; DATASUMMARY);;
+        /* Construir HTML de items separados */
+        Set(_htmlItems;
+            Concat(
+                Filter(colItemsSolicitud; !IsBlank(TipoItem) And Cantidad > 0);
+                "<tr><td style='padding:8px;border:1px solid #ddd'>" & TipoItem &
+                "</td><td style='padding:8px;border:1px solid #ddd;text-align:center'><b>" & Cantidad &
+                "</b></td><td style='padding:8px;border:1px solid #ddd'>" & Coalesce(Comentario; "—") &
+                "</td></tr>"
+            )
+        );;
+        /* Indicar adjuntos en el correo */
+        Set(_tieneAdjuntos; CountRows(_solicitudMaestra.'Datos adjuntos') > 0);;
+        Set(_etiquetaAdjuntos;
+            If(_tieneAdjuntos;
+                "<div style='margin-top:12px;padding:10px;background:#FEF9ED;border-left:4px solid #E8A820'>" &
+                "<b>📎 " & CountRows(_solicitudMaestra.'Datos adjuntos') & " archivo(s) adjunto(s).</b> " &
+                "Ver en el enlace inferior.</div>";
+                ""
+            )
+        );;
+        Set(_etapaTxt;
+            Switch(varEtapaSeleccionada;
+                "SowingMale"; "Sowing (Male)"; "SowingFemale"; "Sowing (Female)";
+                "TissuePre"; "Tissue Pre-Planting"; "FingerprintTissue"; "Fingerprint Tissue";
+                "Transplant"; "Transplant"; "TissuePost"; "Tissue Post-Planting";
+                "PolStart"; "Pollination Start"; "PolEnd"; "Pollination End";
+                "Miniprint"; "Miniprint"; "HarvestFirst"; "First Harvest";
+                "HarvestLast"; "Last Harvest"; "Processing"; "Processing";
+                "FingerprintSeeds"; "Fingerprint Seeds"; "SPA"; "SPA";
+                "Shipping"; "Shipping"; varEtapaSeleccionada
+            )
+        );;
+        Set(_enlace; "https://intecapedu.sharepoint.com/sites/TOMATE/Lists/SOLICITUDESPA/DispForm.aspx?ID=" & Text(_solicitudMaestra.ID));;
+        /* Enviar correo */
+        Office365Outlook.SendEmailV2(
+            "destinatarios@empresa.com";
+            "[" & _etapaTxt & "] New Request #" & Text(_solicitudMaestra.ID) & " — " & varEtapaSetName;
+            "<div style='font-family:Segoe UI,Arial;font-size:13px;color:#0C384C;max-width:700px'>" &
+            "<div style='background:#0C384C;color:white;padding:12px 16px'>" &
+            "<h2 style='margin:0;font-size:16px'>📋 New Pipeline Request #" & Text(_solicitudMaestra.ID) & "</h2></div>" &
+            "<div style='padding:16px;background:#F8FAFC'>" &
+            "<table style='width:100%;font-size:13px'>" &
+            "<tr><td><b>Set:</b></td><td>" & varEtapaSetName & "</td></tr>" &
+            "<tr><td><b>Stage:</b></td><td>" & _etapaTxt & "</td></tr>" &
+            "<tr><td><b>Priority:</b></td><td>" & Coalesce(drpPrioridadtissue.Selected.Value; "Standard") & "</td></tr>" &
+            "<tr><td><b>Requested Date:</b></td><td>" & Text(DatePicker4_3.SelectedDate; "dd/mm/yyyy") & "</td></tr>" &
+            "</table>" &
+            "<h3 style='font-size:14px;color:#0C384C'>📦 Items requested</h3>" &
+            "<table style='border-collapse:collapse;width:100%;font-size:13px'>" &
+            "<tr style='background:#88BC30;color:white'>" &
+            "<th style='padding:8px;border:1px solid #ddd'>Type</th>" &
+            "<th style='padding:8px;border:1px solid #ddd'>Qty</th>" &
+            "<th style='padding:8px;border:1px solid #ddd'>Comment</th></tr>" &
+            _htmlItems &
+            "</table>" &
+            _etiquetaAdjuntos &
+            "<div style='margin-top:16px;padding:10px;background:#EDF7FF;border-left:4px solid #38B4E8'>" &
+            "<b>🔗 View request:</b> <a href='" & _enlace & "'>" & _enlace & "</a></div>" &
+            "</div></div>";
+            {
+                Importance: If(Coalesce(drpPrioridadtissue.Selected.Value; "Standard") = "Urgent and Important"; "High"; "Normal");
+                IsHtml: true
+            }
+        );;
+        Notify("✅ Request #" & Text(_solicitudMaestra.ID) & " created. Email sent."; NotificationType.Success);;
+        Set(varShowRequestForm; false);;
+        Set(varShowActionSelect; false);;
+        Clear(colItemsSolicitud);;
+        Set(varSolicitudExistente; Blank())
+    )
+)
+
+Cambios clave vs tu versión:
+
+Crea UN solo registro maestro por solicitud (con todos los items en un solo correo).
+El total de Quantity es la suma de los items.
+Indica si la solicitud tiene adjuntos en el correo.
+Sintaxis correcta con ;; para encadenar instrucciones.
+
+
+
+🔴 BLOQUE 4 — Crear panel inferior con solicitudes existentes (conPanelSolicitudesExistentes)
+Esto es lo que pides: ver TODAS las solicitudes anteriores de esa etapa, con su status, prioridad, tipo, cantidad, fecha, adjuntos y poder dar seguimiento.
+4.1 — Crear nueva colección colSolicitudesEtapa en App.OnStart
+Control: App
+Propiedad: OnStart (agregar al final)
+powerfxClearCollect(colSolicitudesEtapa; Filter(SOLICITUDESPA; ID = -1))
+4.2 — Agregar nuevo contenedor conPanelSolicitudesExistentes dentro de conNewSets_1
+Ese contenedor debe ir después de conGridId_RowNewSetsS_1 y antes de conItemsSolicitud.
+Estructura propuesta (yaml):
+yaml- conPanelSolicitudesExistentes:
+    Control: GroupContainer@1.5.0
+    Variant: AutoLayout
+    Properties:
+      FillPortions: =0
+      Height: =200
+      LayoutAlignItems: =LayoutAlignItems.Stretch
+      LayoutDirection: =LayoutDirection.Vertical
+      LayoutGap: =6
+      PaddingBottom: =8
+      PaddingLeft: =8
+      PaddingRight: =8
+      PaddingTop: =8
+      Visible: =CountRows(colSolicitudesEtapa) > 0
+      Width: =Parent.Width
+    Children:
+      - lblTituloExistentes:
+          Control: Label@2.5.1
+          Properties:
+            Color: =ColorValue("#0C384C")
+            FontWeight: =FontWeight.Bold
+            Size: =11
+            Text: ="📋 Previous requests for this stage (" & CountRows(colSolicitudesEtapa) & ")"
+            Width: =Parent.Width
+      - galSolicitudesPrevias:
+          Control: Gallery@2.15.0
+          Variant: BrowseLayout_Vertical_OneTextVariant_ver5.0
+          Properties:
+            Height: =160
+            Items: =Sort(colSolicitudesEtapa; Creado; SortOrder.Descending)
+            TemplatePadding: =4
+            TemplateSize: =80
+            Width: =Parent.Width
+          Children:
+            - conSolicitudPrevia:
+                Control: GroupContainer@1.5.0
+                Variant: AutoLayout
+                Properties:
+                  Fill: |-
+                    =Switch(ThisItem.Status.Value;
+                        "Completed"; ColorValue("#ECFDF5");
+                        "Delivered"; ColorValue("#E0F2FE");
+                        "In Process"; ColorValue("#FEF9ED");
+                        "New Request"; ColorValue("#F0F9FF");
+                        ColorValue("#FFFFFF")
+                    )
+                  BorderColor: |-
+                    =Switch(ThisItem.Status.Value;
+                        "Completed"; ColorValue("#88BC30");
+                        "Delivered"; ColorValue("#38B4E8");
+                        "In Process"; ColorValue("#E8A820");
+                        "New Request"; ColorValue("#0C384C");
+                        ColorValue("#DDE2E8")
+                    )
+                  BorderThickness: =1
+                  Height: =72
+                  LayoutAlignItems: =LayoutAlignItems.Center
+                  LayoutDirection: =LayoutDirection.Horizontal
+                  LayoutGap: =8
+                  PaddingBottom: =6
+                  PaddingLeft: =10
+                  PaddingRight: =10
+                  PaddingTop: =6
+                  RadiusBottomLeft: =6
+                  RadiusBottomRight: =6
+                  RadiusTopLeft: =6
+                  RadiusTopRight: =6
+                  Width: =Parent.TemplateWidth - 8
+                Children:
+                  - lblIDPrev:
+                      Control: Label@2.5.1
+                      Properties:
+                        Color: =ColorValue("#0C384C")
+                        FontWeight: =FontWeight.Bold
+                        Size: =11
+                        Text: ="#" & ThisItem.ID
+                        Width: =50
+                  - lblTipoPrev:
+                      Control: Label@2.5.1
+                      Properties:
+                        FillPortions: =1
+                        Size: =10
+                        Text: |-
+                          =ThisItem.ItemType.Value & " · Qty: " & ThisItem.Quantity & Char(10) & 
+                          "Req: " & Text(ThisItem.RequestedDate; "dd/mm/yyyy")
+                  - lblPrioridadPrev:
+                      Control: Label@2.5.1
+                      Properties:
+                        Align: =Align.Center
+                        Color: =Color.White
+                        Fill: |-
+                          =If(ThisItem.Priority.Value = "Urgent and Important"; 
+                              ColorValue("#DC2626"); 
+                              ColorValue("#88BC30")
+                          )
+                        FontWeight: =FontWeight.Bold
+                        Size: =9
+                        Text: =ThisItem.Priority.Value
+                        Width: =100
+                  - lblStatusPrev:
+                      Control: Label@2.5.1
+                      Properties:
+                        Align: =Align.Center
+                        Color: =Color.White
+                        Fill: |-
+                          =Switch(ThisItem.Status.Value;
+                              "Completed"; ColorValue("#0C384C");
+                              "Delivered"; ColorValue("#38B4E8");
+                              "In Process"; ColorValue("#E8A820");
+                              "New Request"; ColorValue("#88BC30");
+                              ColorValue("#7A8694")
+                          )
+                        FontWeight: =FontWeight.Bold
+                        Size: =9
+                        Text: =ThisItem.Status.Value
+                        Width: =100
+                  - icAdjuntoPrev:
+                      Control: Classic/Icon@2.5.0
+                      Properties:
+                        Color: =ColorValue("#38B4E8")
+                        Height: =26
+                        Icon: =Icon.Attach
+                        OnSelect: |-
+                          =Set(varRegistroActual; ThisItem);;
+                          Set(varShowRequestForm; false);;
+                          Set(varMostrarPopupSets; true)
+                        Width: =26
+                  - icCompletarPrev:
+                      Control: Classic/Icon@2.5.0
+                      Properties:
+                        Color: =ColorValue("#88BC30")
+                        Height: =26
+                        Icon: =Icon.CheckBadge
+                        OnSelect: |-
+                          =Patch(SOLICITUDESPA;
+                              ThisItem;
+                              {Status: {Value: "Completed"}; CompletedDate: Today()}
+                          );;
+                          Refresh(SOLICITUDESPA);;
+                          ClearCollect(colSolicitudes; SOLICITUDESPA);;
+                          ClearCollect(colSolicitudesEtapa;
+                              Filter(colSolicitudes;
+                                  SetName = varEtapaSetName And 
+                                  Stage.Value = varEtapaSeleccionada
+                              )
+                          );;
+                          Office365Outlook.SendEmailV2(
+                              "destinatarios@empresa.com";
+                              "[COMPLETED] Request #" & Text(ThisItem.ID) & " — " & varEtapaSetName;
+                              "<div style='font-family:Segoe UI,Arial;font-size:13px;color:#0C384C'>" &
+                              "<div style='background:#88BC30;color:white;padding:12px'>" &
+                              "<h2 style='margin:0'>✅ Request Completed</h2></div>" &
+                              "<div style='padding:16px;background:#F8FAFC'>" &
+                              "Request #" & Text(ThisItem.ID) & " for <b>" & varEtapaSetName & 
+                              "</b> has been marked as <b>COMPLETED</b> on " & 
+                              Text(Today(); "dd/mm/yyyy") & ".</div></div>";
+                              {IsHtml: true}
+                          );;
+                          Notify("✅ Request #" & Text(ThisItem.ID) & " completed. Email sent."; 
+                              NotificationType.Success)
+                        Visible: =ThisItem.Status.Value <> "Completed"
+                        Width: =26
+                  - icMailPrev:
+                      Control: Classic/Icon@2.5.0
+                      Properties:
+                        Color: =ColorValue("#0C384C")
+                        Height: =26
+                        Icon: =Icon.Mail
+                        OnSelect: |-
+                          =Office365Outlook.SendEmailV2(
+                              "destinatarios@empresa.com";
+                              "[FOLLOW-UP] Request #" & Text(ThisItem.ID) & " — " & ThisItem.SetName;
+                              "<div style='font-family:Segoe UI,Arial'>" &
+                              "<h3>Follow-up on request #" & Text(ThisItem.ID) & "</h3>" &
+                              "Status: <b>" & ThisItem.Status.Value & "</b><br>" &
+                              "Type: " & ThisItem.ItemType.Value & "<br>" &
+                              "Quantity: " & ThisItem.Quantity & "<br>" &
+                              "Requested: " & Text(ThisItem.RequestedDate; "dd/mm/yyyy") &
+                              "</div>";
+                              {IsHtml: true}
+                          );;
+                          Notify("📧 Follow-up email sent"; NotificationType.Success)
+                        Width: =26
+4.3 — Recargar colSolicitudesEtapa cuando cambies de etapa
+Esto ya lo agregaste en el Bloque 2 (en cada btnStage_*.OnSelect).
+
+🔴 BLOQUE 5 — Botón "Received" (ButtonCanvas14_8) sin EXPORT-IMPORT
+Ruta: galExportacion → conTarjetaExport → conColTramites → conEstReceived → ButtonCanvas14_8
+Propiedad: OnSelect
+powerfx=Patch(SOLICITUDESPA;
+    ThisItem;
+    {
+        InProcessDate: Today();
+        Status: {Value: "Received"}
+    }
+);;
+Refresh(SOLICITUDESPA);;
+ClearCollect(colSolicitudes; SOLICITUDESPA);;
+With({
+    _enlace: "https://intecapedu.sharepoint.com/sites/TOMATE/Lists/SOLICITUDESPA/DispForm.aspx?ID=" & Text(ThisItem.ID);
+    _stageName: Switch(ThisItem.Stage.Value;
+        "SowingMale"; "Sowing (Male)"; "SowingFemale"; "Sowing (Female)";
+        "TissuePre"; "Tissue Pre-Planting"; "FingerprintTissue"; "Fingerprint Tissue";
+        "Transplant"; "Transplant"; "TissuePost"; "Tissue Post-Planting";
+        "PolStart"; "Pollination Start"; "PolEnd"; "Pollination End";
+        "Miniprint"; "Miniprint"; "HarvestFirst"; "First Harvest";
+        "HarvestLast"; "Last Harvest"; "Processing"; "Processing";
+        "FingerprintSeeds"; "Fingerprint Seeds"; "SPA"; "SPA";
+        "Shipping"; "Shipping"; ThisItem.Stage.Value
+    )
+};
+    Office365Outlook.SendEmailV2(
+        Coalesce(ThisItem.PEA; varUsuario);
+        "✅ Request #" & Text(ThisItem.ID) & " received — " & ThisItem.SetName;
+        "<div style='font-family:Segoe UI,Arial;font-size:13px;color:#0C384C'>" &
+        "<div style='background:#38B4E8;color:white;padding:12px'>" &
+        "<h2 style='margin:0'>✅ Your request has been received</h2></div>" &
+        "<div style='padding:16px;background:#F8FAFC'>" &
+        "<table style='width:100%;font-size:13px'>" &
+        "<tr><td><b>Request:</b></td><td>#" & Text(ThisItem.ID) & "</td></tr>" &
+        "<tr><td><b>Set:</b></td><td>" & ThisItem.SetName & "</td></tr>" &
+        "<tr><td><b>Stage:</b></td><td>" & _stageName & "</td></tr>" &
+        "<tr><td><b>Type:</b></td><td>" & ThisItem.ItemType.Value & "</td></tr>" &
+        "<tr><td><b>Received:</b></td><td>" & Text(Today(); "dd/mm/yyyy") & "</td></tr>" &
+        "</table>" &
+        "<div style='margin-top:12px;padding:10px;background:#EDFAF2;border-left:4px solid #88BC30'>" &
+        "<b>🔗 View:</b> <a href='" & _enlace & "'>" & _enlace & "</a></div>" &
+        "</div></div>";
+        {IsHtml: true}
+    )
+);;
+Notify("✅ Request #" & Text(ThisItem.ID) & " received. Email sent."; NotificationType.Success)
+
+Quité el patch a EXPORT-IMPORT completamente. Solo SOLICITUDESPA.
+
+5.1 — DatePicker1_8.OnChange (al lado del botón Received)
+Propiedad: OnChange
+powerfx=Patch(SOLICITUDESPA; ThisItem; {InProcessDate: Self.SelectedDate})
+
+Antes guardaba en 'EXPORT-IMPORT'.'GL Received'. Ahora en SOLICITUDESPA.InProcessDate.
+
+
+🔴 BLOQUE 6 — Resto de DatePickers de status
+Aplica el mismo patrón a todos los DatePickers de la columna de tramites:
+DatePickerOnChangeDatePicker1 (In Process)=Patch(SOLICITUDESPA; ThisItem; {InProcessDate: Self.SelectedDate})DatePicker1_1 (Pending)=Patch(SOLICITUDESPA; ThisItem; {PendingDate: Self.SelectedDate})DatePicker1_2 (Cancelled)=Patch(SOLICITUDESPA; ThisItem; {CancelledDate: Self.SelectedDate; Status: {Value: "Cancelled"}})DatePicker1_4 (Delivered)=Patch(SOLICITUDESPA; ThisItem; {DeliveryDate: Self.SelectedDate; Status: {Value: "Delivered"}})DatePicker1_5 (IP Request)=Patch(SOLICITUDESPA; ThisItem; {IPRequestDate: Self.SelectedDate})
+
+Necesitas crear esas columnas en SOLICITUDESPA: PendingDate, CancelledDate, DeliveryDate, IPRequestDate. Tipo Fecha.
+
+
+🔴 BLOQUE 7 — Botón "Delivered" (ButtonCanvas14_4) — envía correo de completado
+Ruta: galExportacion → conTarjetaExport → conColTramites → Pack/treat completed → ButtonCanvas14_4
+Propiedad: OnSelect
+powerfx=Patch(SOLICITUDESPA;
+    ThisItem;
+    {
+        Status: {Value: "Completed"};
+        CompletedDate: Today();
+        DeliveryDate: Today()
+    }
+);;
+Refresh(SOLICITUDESPA);;
+ClearCollect(colSolicitudes; SOLICITUDESPA);;
+Office365Outlook.SendEmailV2(
+    Coalesce(ThisItem.PEA; varUsuario);
+    "✅ COMPLETED — Request #" & Text(ThisItem.ID) & " — " & ThisItem.SetName;
+    "<div style='font-family:Segoe UI,Arial;font-size:13px;color:#0C384C'>" &
+    "<div style='background:#88BC30;color:white;padding:12px'>" &
+    "<h2 style='margin:0'>✅ Request Completed Successfully</h2></div>" &
+    "<div style='padding:16px;background:#F8FAFC'>" &
+    "Request <b>#" & Text(ThisItem.ID) & "</b> for set <b>" & ThisItem.SetName & "</b>" &
+    " (" & ThisItem.ItemType.Value & ", qty " & ThisItem.Quantity & ")" &
+    " has been completed on <b>" & Text(Today(); "dd/mm/yyyy") & "</b>." &
+    "</div></div>";
+    {IsHtml: true}
+);;
+Notify("✅ Request #" & Text(ThisItem.ID) & " completed. Email sent."; NotificationType.Success)
+
+Crea columna CompletedDate en SOLICITUDESPA si no existe.
+
+
+🔴 BLOQUE 8 — Color del contenedor según status + espaciado entre solicitudes
+8.1 — conTarjetaExport.Fill
+Ruta: galExportacion → conTarjetaExport
+Propiedad: Fill
+powerfx=Switch(ThisItem.Status.Value;
+    "Completed"; ColorValue("#ECFDF5");
+    "Delivered"; ColorValue("#E0F2FE");
+    "In Process"; ColorValue("#FEF9ED");
+    "New Request"; ColorValue("#F0F9FF");
+    "Cancelled"; ColorValue("#FEE2E2");
+    "Received"; ColorValue("#EDFAF2");
+    Color.White
+)
+8.2 — conTarjetaExport.BorderColor
+Propiedad: BorderColor
+powerfx=Switch(ThisItem.Status.Value;
+    "Completed"; ColorValue("#88BC30");
+    "Delivered"; ColorValue("#38B4E8");
+    "In Process"; ColorValue("#E8A820");
+    "New Request"; ColorValue("#0C384C");
+    "Cancelled"; ColorValue("#DC2626");
+    "Received"; ColorValue("#22A855");
+    ColorValue("#DDE2E8")
+)
+8.3 — conTarjetaExport.BorderThickness
+powerfx=2
+8.4 — Espaciado en galExportacion
+Ruta: galExportacion
+Propiedad: TemplatePadding
+powerfx=12
+
+Esto agrega 12px entre cada tarjeta.
+
+
+🔴 BLOQUE 9 — Corregir DDS dinámico en EstStart_Sowing
+Tu problema: Tissue pre-planting muestra (1 DDS), Fingerprint Tissue (-9 DDS), Transplant (-8 DDS). Esto pasa porque está usando Coalesce(SowingMaleReal, SowingMaleExp) para fechaSiembra y Coalesce(*Real, *Exp) para fechaEtapa, mezclando real y estimadas.
+9.1 — Cambiar TODOS los btnStage_*.Text a comparar SIEMPRE con SowingMaleExp
+Ejemplo btnStage_Tissue.Text:
+powerfx=With({
+    fechaSiembra: ThisItem.SowingMaleExp;
+    fechaEtapa:   ThisItem.TissuePreExp
+};
+    "Tissue pre-planting" & Char(10) & 
+    If(!IsBlank(fechaSiembra) And !IsBlank(fechaEtapa);
+        "(" & DateDiff(fechaSiembra; fechaEtapa; TimeUnit.Days) & " DDS)";
+        ""
+    )
+)
+Aplicar el mismo patrón a:
+BotónEtapabtnStage_Sowing.TextIf(ThisItem.Crop.Value = "Cucumber"; "Sowing male"; "Sowing") & Char(10) & "(0 DDS)"btnStage_Sowing_1.TextSowingFemExpbtnStage_Tissue.TextTissuePreExpbtnStage_FPTissue.TextFingerprintTissueExpbtnStage_Trasplanted.TextTransplantExpbtnStage_TissuePost.TextTissuePostExpbtnStage_Polinitation.TextPolStartExpbtnStage_Polinitation_1.TextPolEndExpbtnStage_Miniprint.TextMiniprintExpbtnStage_Harvest.TextHarvestFirstExpbtnStage_Harvest_1.TextHarvestLastExpbtnStage_Processing.TextProcessingExpbtnStage_FPSeeds.TextFingerprintSeedsExpbtnStage_SPA.TextSPAExpbtnStage_FPSeeds_1.TextShippingExp
+
+Al usar SIEMPRE *Exp (estimadas), las DDS se mantienen consistentes con la cascada que se calcula en EstStart_Sowing.OnChange (sumas de offsets desde SowingMaleExp). Cuando cambies EstStart_Sowing, todas las DDS se recalculan automáticamente.
+
+
+🔴 BLOQUE 10 — Crear columnas en SharePoint SOLICITUDESPA
+Antes de probar la app, asegúrate de crear estas columnas en la lista SOLICITUDESPA:
+ColumnaTipoNotasInProcessDateFechaPara ReceivedPendingDateFechaCancelledDateFechaDeliveryDateFechaIPRequestDateFechaCompletedDateFechaStatusChoiceAgregar opción "Received" si no existe
+
+📋 Orden de ejecución recomendado
+
+PRIMERO: Crea las columnas en SharePoint SOLICITUDESPA (Bloque 10).
+SEGUNDO: Refresca DATASUMMARY y SOLICITUDESPA en el panel Data.
+TERCERO: Aplica los cambios del Bloque 1 (attachment) y prueba.
+CUARTO: Aplica los cambios del Bloque 2 (permitir múltiples solicitudes).
+QUINTO: Aplica el Bloque 3 (botón guardar con email correcto).
+SEXTO: Crea el panel del Bloque 4 (solicitudes previas).
+SÉPTIMO: Aplica los Bloques 5-7 (botones de status).
+OCTAVO: Aplica el Bloque 8 (colores).
+NOVENO: Aplica el Bloque 9 (DDS dinámico).
+
+
+
+
+🔴 SOLUCIÓN: Reemplazar FormViewer1 por un Edit Form
+Paso 1 — Eliminar el FormViewer1 actual
+En conPopupSowingmaleattacment → conCajaBlanca, borra el control FormViewer1 completo.
+Paso 2 — Insertar un Edit Form en su lugar
+Menú Insertar → Formularios → Editar (en español: "Formulario de edición").
+Renómbralo a frmAdjuntos.
+Paso 3 — Configurar el formulario
+Selecciona frmAdjuntos y configura estas propiedades:
+frmAdjuntos.DataSource
+powerfx=SOLICITUDESPA
+frmAdjuntos.Item
+powerfx=varRegistroActual
+frmAdjuntos.DefaultMode
+powerfx=FormMode.Edit
+frmAdjuntos.Height
+powerfx=300
+frmAdjuntos.Width
+powerfx=600
+frmAdjuntos.Y
+powerfx=40
+Paso 4 — Mostrar SOLO el campo "Datos adjuntos"
+Con el form seleccionado, en el panel derecho Propiedades → Editar campos:
+
+Quita TODOS los campos por defecto.
+Agrega solo el campo "Datos adjuntos" (Attachments).
+
+Paso 5 — Corregir el ButtonCanvas10.OnSelect
+Ruta: conPopupSowingmaleattacment → conCajaBlanca → conBotones2 → ButtonCanvas10
+Propiedad: OnSelect (versión corregida)
+powerfx=SubmitForm(frmAdjuntos)
+Paso 6 — Configurar frmAdjuntos.OnSuccess
+Propiedad: OnSuccess
+powerfx=Refresh(SOLICITUDESPA);;
+ClearCollect(colSolicitudes; SOLICITUDESPA);;
+Set(varSolicitudExistente; LookUp(SOLICITUDESPA; ID = varRegistroActual.ID));;
+Set(varMostrarPopupSets; false);;
+Set(varShowRequestForm; true);;
+Notify("📎 Archivo adjuntado a solicitud #" & varRegistroActual.ID; NotificationType.Success)
+Paso 7 — Configurar frmAdjuntos.OnFailure
+Propiedad: OnFailure
+powerfx=Notify("❌ Error al guardar adjunto: " & frmAdjuntos.Error; NotificationType.Error)
+
+✅ Por qué esto sí funciona
+
+Form (editable) sí tiene las propiedades Error, OnSuccess, OnFailure y soporta SubmitForm().
+FormViewer es solo para mostrar datos (read-only), no permite guardar.
+
+
+🔧 Bonus: Si NO quieres reemplazar el form (alternativa más rápida)
+Si no quieres tocar la estructura del form, aquí tienes una versión SIMPLIFICADA del ButtonCanvas10.OnSelect que NO usa SubmitForm ni .Error — solo cierra el popup. Los archivos se guardan automáticamente cuando el usuario los selecciona (porque el Attachments control tiene su propio buffer):
+ButtonCanvas10.OnSelect (versión sin SubmitForm)
+powerfx=Refresh(SOLICITUDESPA);;
+ClearCollect(colSolicitudes; SOLICITUDESPA);;
+Set(varSolicitudExistente; LookUp(SOLICITUDESPA; ID = varRegistroActual.ID));;
+Set(varMostrarPopupSets; false);;
+Set(varShowRequestForm; true);;
+Notify("📎 Volver a la solicitud #" & varRegistroActual.ID; NotificationType.Success)
+⚠️ PERO esta versión tiene un problema: con FormViewer los archivos seleccionados NO se guardan en SharePoint porque no hay un mecanismo de submit. Por eso te insisto en hacer el cambio del Paso 1-7.
+
